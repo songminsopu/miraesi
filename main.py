@@ -1,87 +1,73 @@
-import cv2
-from pororo import Pororo
-from pororo.pororo import SUPPORTED_TASKS
-from utils.image_util import plt_imshow, put_text
-import warnings
+import openai
+import os
+import asyncio
 
-warnings.filterwarnings('ignore')
+from dotenv import load_dotenv, find_dotenv
 
+from pororoOcr import PororoOcr
 
-class PororoOcr:
-    def __init__(self, model: str = "brainocr", lang: str = "ko", **kwargs):
-        self.model = model
-        self.lang = lang
-        self._ocr = Pororo(task="ocr", lang=lang, model=model, **kwargs)
-        self.img_path = None
-        self.ocr_result = {}
-
-    def run_ocr(self, img_path: str, debug: bool = False):
-        self.img_path = img_path
-        self.ocr_result = self._ocr(img_path, detail=True)
-        print(self.ocr_result)
-
-        if self.ocr_result['description']:
-            ocr_text = self.ocr_result["description"]
-        else:
-            ocr_text = "No text detected."
-
-        if debug:
-            self.show_img_with_ocr()
-
-        return ocr_text
-
-    @staticmethod
-    def get_available_langs():
-        return SUPPORTED_TASKS["ocr"].get_available_langs()
-
-    @staticmethod
-    def get_available_models():
-        return SUPPORTED_TASKS["ocr"].get_available_models()
-
-    def get_ocr_result(self):
-        return self.ocr_result
-
-    def get_img_path(self):
-        return self.img_path
-
-    def show_img(self):
-        plt_imshow(img=self.img_path)
-
-    def show_img_with_ocr(self):
-        img = cv2.imread(self.img_path)
-        roi_img = img.copy()
-
-        for text_result in self.ocr_result['bounding_poly']:
-            text = text_result['description']
-            tlX = text_result['vertices'][0]['x']
-            tlY = text_result['vertices'][0]['y']
-            trX = text_result['vertices'][1]['x']
-            trY = text_result['vertices'][1]['y']
-            brX = text_result['vertices'][2]['x']
-            brY = text_result['vertices'][2]['y']
-            blX = text_result['vertices'][3]['x']
-            blY = text_result['vertices'][3]['y']
-
-            pts = ((tlX, tlY), (trX, trY), (brX, brY), (blX, blY))
-
-            topLeft = pts[0]
-            topRight = pts[1]
-            bottomRight = pts[2]
-            bottomLeft = pts[3]
-
-            cv2.line(roi_img, topLeft, topRight, (0, 255, 0), 2)
-            cv2.line(roi_img, topRight, bottomRight, (0, 255, 0), 2)
-            cv2.line(roi_img, bottomRight, bottomLeft, (0, 255, 0), 2)
-            cv2.line(roi_img, bottomLeft, topLeft, (0, 255, 0), 2)
-            roi_img = put_text(roi_img, text, topLeft[0], topLeft[1] - 20, font_size=15)
-
-            # print(text)
-
-        plt_imshow(["Original", "ROI"], [img, roi_img], figsize=(16, 10))
+_ = load_dotenv(find_dotenv())
 
 
-if __name__ == "__main__":
-    ocr = PororoOcr()
-    image_path = input("Enter image path: ")
-    text = ocr.run_ocr(image_path, debug=True)
-    print('Result :', text)
+openai.api_key = os.getenv('OPENAI_API_KEY')
+
+async def get_completion(prompt, model="gpt-3.5-turbo"):
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+    response = await openai.ChatCompletion.acreate(
+        model=model,
+        messages=messages,
+        temperature=0
+    )
+
+    return response.choices[0].message["content"]
+    
+
+ocr = PororoOcr()
+
+image_path = input("Enter image path: ")
+ocr_lst = ocr.run_ocr(image_path, debug=False)
+
+lst_text = ""
+
+for idx, text in enumerate(ocr_lst, 1):
+    # lst_text += f"{idx}. {text}\n"
+    lst_text += f"{text}\n"
+
+prompt = f"""
+다음 작업을 수행하세요:
+
+```
+{lst_text}```
+
+```로 구분된 텍스트를 분석하여 창의적인 뒷이야기를 500자로 구체적이고, 자연스럽게 작성하세요.
+그리고 작성중에 어색한 문장이나 단어라고 생각되면 고치세요.
+
+다음 형식을 사용하세요:
+{{
+    title: <소설의 제목>
+    content: <소설의 내용>
+}}
+"""
+
+# prompt = f"""
+# 다음 작업을 수행하세요:
+
+# {lst_text}
+
+# 위에 순서대로 나열된 대사를 분석하여 이 이야기의 결말을 대사와 비슷한 말투와 500자로 자연스럽게 작성하세요.
+# 그리고 작성중에 어색한 문장이나 단어라고 생각되면 고치세요. 
+
+# 다음 형식을 사용하세요:
+# {{
+#     title: <소설의 제목>
+#     content: <[소설의 내용]>
+# }}
+# """
+
+print(prompt)
+
+# response = get_completion(prompt=prompt)
+result = asyncio.run(get_completion(prompt=prompt))
+print(result)
